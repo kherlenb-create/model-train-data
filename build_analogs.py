@@ -64,7 +64,22 @@ PROD_PARITY = False                  # True  -> reproduce live prod (~90-98% ana
                                      # analogs_all.npz; this run writes analogs_train.npz.
 SEED       = 0
 
-LENGTHS      = list(range(10, 51)) + list(range(60, 101, 10))  # 10..50 every int, then 60,70,80,90,100 # cover every pattern length 10..100 (prod range)  #  130,160,200,(30-aar shift hiih), 250,300 candle windows (50-aar shift hiih )
+LENGTHS      = (list(range(10, 51))          # 10..50, every integer
+                + list(range(60, 101, 10))   # 60,70,80,90,100  -> prod range ends here
+                + [130, 160, 200]            # long windows, bank strided by 30
+                + [250, 300])                # very long windows, bank strided by 50
+
+
+def stride_for(N: int) -> int:
+    """Bank stride (analog end-index step) for a given window length.
+
+    <=100 keeps stride 1 = exact prod coverage. Beyond that, adjacent windows
+    overlap by >99% and the bank cost grows with the window, so the long lengths
+    are sampled coarsely: 30 for 130-200, 50 for 250+. Retrieval for those
+    lengths is therefore NOT prod-parity -- prod only scans 10..100."""
+    if N <= 100:
+        return STRIDE
+    return 30 if N <= 200 else 50
 OUT_PATH     = "analogs_7y.npz"   # leak-free training set (analogs_all.npz = prod-parity/eval)
 CHECKPOINT_EVERY = 5                 # save every N lengths (also always at the end)
 MAXK         = max(KS)
@@ -206,7 +221,7 @@ if __name__ == "__main__":
         idxs = by_len[N]
         t = time.time()
         raw = T.retrieve_batch(store, [queries[g] for g in idxs], top_k=MAXK,
-                               stride=STRIDE, horizon=HORIZON, query_edge=QUERY_EDGE,
+                               stride=stride_for(N), horizon=HORIZON, query_edge=QUERY_EDGE,
                                lookback_years=list(FILTERS.values()),
                                with_continuations=False, prod_parity=PROD_PARITY)
         fill(arr, raw, idxs, FILTERS, sym2id)
@@ -215,7 +230,7 @@ if __name__ == "__main__":
         got = [len(r["matches"]) for r in raw[next(iter(FILTERS.values()))] if r]
         elapsed = time.time() - t_start
         eta = elapsed / i * (len(todo) - i)
-        print(f"[{i:2}/{len(todo)}] len={N:3}  nq={len(idxs):4}  "
+        print(f"[{i:2}/{len(todo)}] len={N:3}  stride={stride_for(N):2}  nq={len(idxs):4}  "
               f"{time.time()-t:5.1f}s  med analogs {int(np.median(got)) if got else 0:3}/{MAXK}"
               f"  | elapsed {elapsed/60:4.1f}m  eta {eta/60:4.1f}m", flush=True)
 
